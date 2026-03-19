@@ -5,9 +5,12 @@ const path = require("path");
 
 const text = process.argv.slice(2).join(" ") || "Hello student";
 const tmpFile = path.join(os.tmpdir(), `tts-${Date.now()}.mp3`);
-const pythonPath = "/home/cephas/tts-env/.venv/bin/python";
 
-const edge = spawn(pythonPath, [
+// Auto-detect Python path
+const isWindows = os.platform() === "win32";
+const pythonCmd = isWindows ? "python" : "python3";
+
+const edge = spawn(pythonCmd, [
   "-m",
   "edge_tts",
   "--voice",
@@ -15,7 +18,7 @@ const edge = spawn(pythonPath, [
   "--text",
   text,
   "--write-media",
-  tmpFile
+  tmpFile,
 ]);
 
 edge.stderr.on("data", (err) => {
@@ -24,6 +27,7 @@ edge.stderr.on("data", (err) => {
 
 edge.on("close", (code) => {
   if (code !== 0) {
+    process.stderr.write(`edge_tts exited with code ${code}\n`);
     process.exit(code);
     return;
   }
