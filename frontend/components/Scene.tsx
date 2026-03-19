@@ -15,7 +15,7 @@ type Mode = "idle" | "talking" | "board";
 function AnimatedModel({ boardVisible }: { boardVisible: boolean }) {
   const groupRef = useRef<THREE.Group>(null);
   // When board visible: stay right. When idle: center
-  const targetX = boardVisible ? 0.6 : 0;
+const targetX = boardVisible ? 3.9 : 0;
 
   useFrame(() => {
     if (!groupRef.current) return;
@@ -27,7 +27,7 @@ function AnimatedModel({ boardVisible }: { boardVisible: boolean }) {
   });
 
   return (
-   <group ref={groupRef} position={[0, -4.8, -5]}>
+   <group ref={groupRef} position={[boardVisible ? 1.8 : 0, -4.8, -5]}>
       <Suspense fallback={
         <mesh>
           <boxGeometry args={[0.5, 1.5, 0.5]} />
@@ -212,18 +212,18 @@ BOARD:
         </Canvas>
       </div>
 
-      {/* Whiteboard — LEFT side, slides in */}
-      <div style={{
-        position: "absolute", top: 0, left: 0, bottom: 0,
-        width: "50%", zIndex: 2, pointerEvents: "none",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        padding: "64px 12px 130px 24px",
-        opacity: whiteboardVisible ? 1 : 0,
-        transform: whiteboardVisible ? "translateX(0)" : "translateX(-40px)",
-        transition: "opacity 0.7s ease, transform 0.7s cubic-bezier(0.4,0,0.2,1)",
-      }}>
-        {whiteboardVisible && <Whiteboard text={whiteboardText} topic={topic} />}
-      </div>
+ {/* Whiteboard — LEFT side, slides in, BIGGER */}
+<div style={{
+  position: "absolute", top: 0, left: 0, bottom: 0,
+  width: "58%", zIndex: 1, pointerEvents: "none",
+  display: "flex", alignItems: "center", justifyContent: "center",
+  padding: "56px 8px 120px 20px",
+  opacity: whiteboardVisible ? 1 : 0,
+  transform: whiteboardVisible ? "translateX(0)" : "translateX(-40px)",
+  transition: "opacity 0.7s ease, transform 0.7s cubic-bezier(0.4,0,0.2,1)",
+}}>
+  {whiteboardVisible && <Whiteboard text={whiteboardText} topic={topic} />}
+</div>
 
       {/* Idle state greeting */}
       {mode === "idle" && (

@@ -33,7 +33,7 @@ export default function Whiteboard({ text, topic }: WhiteboardProps) {
 
   return (
     <div style={{
-      width: "100%", maxWidth: "500px",
+      width: "100%", maxWidth: "100%",
       background: "#fafaf8",
       borderRadius: "2px",
       boxShadow: "0 0 0 10px #1a1a1a, 0 0 0 12px #333, 0 24px 80px rgba(0,0,0,0.8)",
