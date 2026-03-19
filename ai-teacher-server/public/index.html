@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Miss TMS</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 850px;
+      margin: 40px auto;
+      padding: 20px;
+      text-align: center;
+      background: #fafafa;
+    }
+
+    h1 {
+      margin-bottom: 10px;
+    }
+
+    p {
+      color: #555;
+    }
+
+    button {
+      padding: 14px 22px;
+      font-size: 16px;
+      cursor: pointer;
+      margin: 8px;
+      border: none;
+      border-radius: 8px;
+      background: #222;
+      color: white;
+    }
+
+    button.secondary {
+      background: #777;
+    }
+
+    #status {
+      margin: 20px 0;
+      font-weight: bold;
+      font-size: 18px;
+    }
+
+    #heardBox,
+    #answerBox {
+      text-align: left;
+      background: white;
+      border-radius: 10px;
+      padding: 16px;
+      margin-top: 16px;
+      min-height: 90px;
+      white-space: pre-wrap;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    .listening {
+      color: green;
+    }
+
+    .thinking {
+      color: #cc7a00;
+    }
+
+    .stopped {
+      color: #aa0000;
+    }
+  </style>
+</head>
+<body>
+  <h1>Miss TMS</h1>
+  <p>Click start, speak naturally, and Miss TMS will keep listening until you say “stop listening”.</p>
+
+  <button onclick="startConversation()">Start Listening</button>
+  <button class="secondary" onclick="stopConversation()">Stop Listening</button>
+  <button class="secondary" onclick="resetMemory()">Reset Memory</button>
+
+  <div id="status">Ready</div>
+
+  <h3>You said:</h3>
+  <div id="heardBox"></div>
+
+  <h3>Miss TMS:</h3>
+  <div id="answerBox"></div>
+
+  <audio id="player" controls></audio>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const heardBox = document.getElementById("heardBox");
+    const answerBox = document.getElementById("answerBox");
+    const player = document.getElementById("player");
+
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    let recognition = null;
+    let shouldKeepListening = false;
+    let isListening = false;
+    let sessionId = localStorage.getItem("miss_tms_session_id") || null;
+
+    function setStatus(text, className = "") {
+      statusEl.textContent = text;
+      statusEl.className = className;
+    }
+
+    async function askMissTMS(prompt) {
+      try {
+        setStatus("Fetching answer...", "thinking");
+
+        const res = await fetch("/ask-voice", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            prompt,
+            sessionId,
+          }),
+        });
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+
+        sessionId = data.sessionId;
+        localStorage.setItem("miss_tms_session_id", sessionId);
+
+        answerBox.textContent = data.answer;
+
+        setStatus("Speaking answer...", "thinking");
+
+        await speakAnswer(data.answer);
+
+        if (shouldKeepListening) {
+          beginListening();
+        } else {
+          setStatus("Stopped", "stopped");
+        }
+      } catch (error) {
+        answerBox.textContent = `Error: ${error.message}`;
+        setStatus("Failed", "stopped");
+      }
+    }
+
+    async function speakAnswer(text) {
+      return new Promise(async (resolve, reject) => {
+        try {
+          const res = await fetch("/speak-text", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ text }),
+          });
+
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+
+          player.src = url;
+          player.onended = () => {
+            URL.revokeObjectURL(url);
+            resolve();
+          };
+
+          player.onerror = () => {
+            reject(new Error("Audio playback failed"));
+          };
+
+          await player.play();
+        } catch (error) {
+          reject(error);
+        }
+      });
+    }
+
+    function beginListening() {
+      if (!SpeechRecognition) {
+        alert("Speech recognition is not supported in this browser. Please use Chrome.");
+        return;
+      }
+
+      recognition = new SpeechRecognition();
+      recognition.lang = "en-US";
+      recognition.interimResults = true;
+      recognition.continuous = false;
+
+      let finalTranscript = "";
+
+      recognition.onstart = () => {
+        isListening = true;
+        setStatus("Listening...", "listening");
+        heardBox.textContent = "";
+      };
+
+      recognition.onresult = (event) => {
+        let interimTranscript = "";
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+
+        heardBox.textContent = (finalTranscript || interimTranscript).trim();
+      };
+
+      recognition.onerror = (event) => {
+        console.error("Speech recognition error:", event.error);
+        isListening = false;
+
+        if (shouldKeepListening) {
+          setTimeout(() => {
+            beginListening();
+          }, 800);
+        } else {
+          setStatus(`Speech error: ${event.error}`, "stopped");
+        }
+      };
+
+      recognition.onend = async () => {
+        isListening = false;
+
+        const spokenText = (heardBox.textContent || "").trim();
+
+        if (!shouldKeepListening) {
+          setStatus("Stopped", "stopped");
+          return;
+        }
+
+        if (!spokenText) {
+          setStatus("Didn't catch that. Listening again...", "listening");
+          setTimeout(() => {
+            if (shouldKeepListening) beginListening();
+          }, 500);
+          return;
+        }
+
+        const lower = spokenText.toLowerCase();
+
+        if (
+          lower.includes("stop listening") ||
+          lower.includes("stop talking") ||
+          lower.includes("goodbye miss tms") ||
+          lower === "stop"
+        ) {
+          shouldKeepListening = false;
+          setStatus("Stopped", "stopped");
+          answerBox.textContent = "Alright, I’ll stop listening now.";
+          return;
+        }
+
+        await askMissTMS(spokenText);
+      };
+
+      recognition.start();
+    }
+
+    function startConversation() {
+      if (shouldKeepListening || isListening) return;
+      shouldKeepListening = true;
+      beginListening();
+    }
+
+    function stopConversation() {
+      shouldKeepListening = false;
+
+      if (recognition && isListening) {
+        recognition.stop();
+      }
+
+      player.pause();
+      setStatus("Stopped", "stopped");
+    }
+
+    async function resetMemory() {
+      try {
+        if (sessionId) {
+          await fetch("/reset-memory", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ sessionId }),
+          });
+        }
+
+        sessionId = null;
+        localStorage.removeItem("miss_tms_session_id");
+        heardBox.textContent = "";
+        answerBox.textContent = "";
+        setStatus("Memory reset", "");
+      } catch (error) {
+        console.error(error);
+        setStatus("Failed to reset memory", "stopped");
+      }
+    }
+  </script>
+</body>
+</html>
