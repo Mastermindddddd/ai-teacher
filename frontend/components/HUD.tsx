@@ -27,7 +27,7 @@ export default function HUD({ messageCount, isSpeaking, mode, onReset }: HUDProp
         fontFamily: "'Syne', sans-serif", fontWeight: 800,
         fontSize: "14px", letterSpacing: "0.1em",
         textTransform: "uppercase", color: "#111",
-      }}>Miss TMS</div>
+      }}>Mr M</div>
 
       <div style={{ width: "1px", height: "14px", background: "#ddd" }} />
 

@@ -308,7 +308,12 @@ export default function Scene() {
             display: "flex", flexDirection: "column", alignItems: "center", gap: "6px",
             animation: "fadeUp 0.5s ease both",
           }}>
-            
+            <div style={{ fontSize: "20px", fontWeight: 800, fontFamily: "'Syne', sans-serif", color: "#111" }}>
+              Hello, I'm Miss TMS 👋
+            </div>
+            <div style={{ fontSize: "13px", color: "rgba(0,0,0,0.45)", fontFamily: "'JetBrains Mono', monospace" }}>
+              Ask me anything to start your lesson
+            </div>
           </div>
         )}
 

@@ -1,5 +1,34 @@
 "use client";
 
+/**
+ * EXACT BIND POSE FROM LOGS:
+ *   leftShoulder   x=1.6808  y=0.0512  z=-1.3611
+ *   leftArm        x=0.1036  y=-0.0109 z=-0.2092   (T-pose, arm ~horizontal)
+ *   leftForeArm    x=-0.1024 y=-0.0153 z=0.2963
+ *   rightShoulder  x=1.6808  y=-0.0512 z=1.3611
+ *   rightArm       x=0.1036  y=0.0109  z=0.2092
+ *   rightForeArm   x=-0.1024 y=0.0153  z=-0.2963
+ *
+ * World X-axis of leftArm at bind: (0.984, -0.095, -0.153)
+ * → Y≈0, meaning the bone's X axis is nearly horizontal.
+ * → The arm is in near-T-pose.
+ *
+ * The shoulder has a large X rotation (1.68 rad ≈ 96°) which has
+ * already tilted the arm bone's parent frame. In this parent frame,
+ * rotating the arm bone's Z DOWN requires understanding the parent.
+ *
+ * DIRECT APPROACH: use the first log's values (before our code
+ * interfered) which showed leftArm z=-0.2092 at true bind pose.
+ * We need to rotate the arm DOWN in world space by ~90°.
+ *
+ * Given the shoulder's x=1.68 rad parent rotation, the arm's
+ * local Z rotation controls lateral swing. To point arm DOWN:
+ *   - Increase leftArm X significantly (rotate forward/down)
+ *   - leftArm target: x = 0.1036 + 1.3  →  ~1.4 rad
+ *   - rightArm target: x = 0.1036 + 1.3 →  ~1.4 rad  (same, symmetric)
+ * Z stays near bind pose (just controls front/back sway).
+ */
+
 import { Suspense, useRef, useEffect, useCallback } from "react";
 import { useFrame } from "@react-three/fiber";
 import { ContactShadows, useGLTF } from "@react-three/drei";
@@ -22,13 +51,9 @@ interface BoneRefs {
   teethLower:    THREE.Object3D;
   teethRestY:    number;
   teethRestRotX: number;
-  // Captured bind-pose rotations for every bone we touch
-  rest: Record<string, RotXYZ>;
+  rest:          Record<string, RotXYZ>;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Head / spine gestures (deltas from rest)
-// ─────────────────────────────────────────────────────────────
 type HeadGesture = {
   name:     string;
   duration: number;
@@ -58,18 +83,9 @@ const WAITING_GESTURES: HeadGesture[] = [
 function lerp(a: number, b: number, t: number) {
   return THREE.MathUtils.lerp(a, b, t);
 }
+function snap(r: THREE.Euler): RotXYZ { return { x: r.x, y: r.y, z: r.z }; }
 
-function snap(r: THREE.Euler): RotXYZ {
-  return { x: r.x, y: r.y, z: r.z };
-}
-
-// ─────────────────────────────────────────────────────────────
-// Inner GLTF loader
-// ─────────────────────────────────────────────────────────────
-function SyncedModel({
-  scale = 1.75,
-  onReady,
-}: {
+function SyncedModel({ scale = 1.75, onReady }: {
   scale?: number;
   onReady: (refs: BoneRefs) => void;
 }) {
@@ -78,8 +94,7 @@ function SyncedModel({
 
   useEffect(() => {
     if (called.current) return;
-
-    const find = (name: string): THREE.Object3D | null => {
+    const find = (name: string) => {
       let r: THREE.Object3D | null = null;
       scene.traverse(o => { if (o.name === name) r = o; });
       return r;
@@ -98,38 +113,25 @@ function SyncedModel({
     const rightForeArm  = find("RightForeArm_040") as THREE.Bone;
     const teethLower    = find("AvatarTeethLower") as THREE.Object3D;
 
-    const required = [spine2, neck1, head, leftEye, rightEye,
-                      leftShoulder, leftArm, leftForeArm,
-                      rightShoulder, rightArm, rightForeArm, teethLower];
-
-    if (required.some(b => !b)) {
-      console.warn("⚠️ Missing bones");
-      return;
+    if ([spine2,neck1,head,leftEye,rightEye,leftShoulder,leftArm,
+         leftForeArm,rightShoulder,rightArm,rightForeArm,teethLower].some(b=>!b)) {
+      console.warn("⚠️ Missing bones"); return;
     }
 
-    // Log every bone's exact bind-pose rotation so we can tune offsets
-    const boneMap: Record<string, THREE.Object3D> = {
+    const rest: Record<string, RotXYZ> = {};
+    for (const [k, b] of Object.entries({
       spine2, neck1, head, leftEye, rightEye,
       leftShoulder, leftArm, leftForeArm,
       rightShoulder, rightArm, rightForeArm,
-    };
-    console.group("📐 Bind-pose rotations (radians):");
-    const rest: Record<string, RotXYZ> = {};
-    for (const [k, b] of Object.entries(boneMap)) {
-      rest[k] = snap(b.rotation);
-      console.log(
-        `  ${k.padEnd(16)} x=${rest[k].x.toFixed(4)}  y=${rest[k].y.toFixed(4)}  z=${rest[k].z.toFixed(4)}`
-      );
-    }
-    console.groupEnd();
+    })) { rest[k] = snap((b as THREE.Object3D).rotation); }
 
     called.current = true;
     onReady({
-      spine2: spine2!, neck1: neck1!, head: head!,
-      leftEye: leftEye!, rightEye: rightEye!,
-      leftShoulder: leftShoulder!, leftArm: leftArm!, leftForeArm: leftForeArm!,
-      rightShoulder: rightShoulder!, rightArm: rightArm!, rightForeArm: rightForeArm!,
-      teethLower: teethLower!,
+      spine2:spine2!, neck1:neck1!, head:head!,
+      leftEye:leftEye!, rightEye:rightEye!,
+      leftShoulder:leftShoulder!, leftArm:leftArm!, leftForeArm:leftForeArm!,
+      rightShoulder:rightShoulder!, rightArm:rightArm!, rightForeArm:rightForeArm!,
+      teethLower:teethLower!,
       teethRestY: teethLower!.position.y,
       teethRestRotX: teethLower!.rotation.x,
       rest,
@@ -139,9 +141,6 @@ function SyncedModel({
   return <primitive object={scene} scale={scale} />;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Main export
-// ─────────────────────────────────────────────────────────────
 export default function AnimatedModel({
   isSpeaking,
   audioAnalyser,
@@ -154,25 +153,35 @@ export default function AnimatedModel({
   const freqData   = useRef<Uint8Array | null>(null);
   const B          = useRef<BoneRefs | null>(null);
 
-  // Gesture state
   const curPose    = useRef<HeadGesture>(TEACHING_GESTURES[0]);
   const nextPose   = useRef<HeadGesture>(TEACHING_GESTURES[0]);
   const poseTimer  = useRef(0);
   const blendAlpha = useRef(1.0);
   const isSpeakRef = useRef(false);
 
-  // Smoothed head/spine rotations — absolute world values
   const smSpine2 = useRef<RotXYZ>({ x: 0, y: 0, z: 0 });
   const smNeck1  = useRef<RotXYZ>({ x: 0, y: 0, z: 0 });
   const smHead   = useRef<RotXYZ>({ x: 0, y: 0, z: 0 });
 
-  // Smoothed arm target rotations — absolute (rest + down offset)
-  // We lerp arms toward these every frame so they ease into position
-  const smLeftArm    = useRef<RotXYZ>({ x: 0, y: 0, z: 0 });
-  const smRightArm   = useRef<RotXYZ>({ x: 0, y: 0, z: 0 });
-  const armsReady    = useRef(false);
+  // Hardcoded arm targets derived from the exact bind-pose log values.
+  // Bind: leftArm x=0.1036, z=-0.2092  (arm pointing ~forward/outward)
+  // The shoulder's large X rotation (1.68 rad) means the arm bone's
+  // local X axis maps to world Z (forward), and local Z maps to world Y (up/down).
+  // To swing the arm DOWN we need to rotate local X by ~+1.35 rad.
+  // This was determined by: shoulder_x (1.68) brings Z up → arm X rotates Z down.
+  //
+  // Targets (absolute rotations, not deltas):
+  //   leftArm:      x=+1.45  y=-0.0109  z=-0.2092  (x increased by ~1.35)
+  //   leftForeArm:  x=-0.10  y=-0.0153  z=+0.2963  (keep near rest, slight bend)
+  //   rightArm:     x=+1.45  y=+0.0109  z=+0.2092  (mirror)
+  //   rightForeArm: x=-0.10  y=+0.0153  z=-0.2963
 
-  // Jaw / blink
+  const tLA  = useRef<RotXYZ>({ x:  1.45, y: -0.0109, z: -0.2092 });
+  const tLFA = useRef<RotXYZ>({ x: -0.10, y: -0.0153, z:  0.2963 });
+  const tRA  = useRef<RotXYZ>({ x:  1.45, y:  0.0109, z:  0.2092 });
+  const tRFA = useRef<RotXYZ>({ x: -0.10, y:  0.0153, z: -0.2963 });
+  const armsReady = useRef(false);
+
   const jawOpen    = useRef(0);
   const eyeBlink   = useRef(0);
   const blinkTimer = useRef(0);
@@ -190,39 +199,28 @@ export default function AnimatedModel({
     B.current = refs;
     const { rest } = refs;
 
-    // Seed head/spine smooth values from bind pose
     smSpine2.current = { ...rest.spine2 };
     smNeck1.current  = { ...rest.neck1  };
     smHead.current   = { ...rest.head   };
 
-    // ── ARM DOWN TARGETS ──────────────────────────────────
-    // T-pose: arms are horizontal (Z ≈ ±1.57 rad from spine).
-    // To bring them to a relaxed "hands at sides" position we rotate
-    // Z back toward 0 (or slightly past). The exact target is:
-    //   leftArm  Z: rest.z + 1.4   (rotate inward/down)
-    //   rightArm Z: rest.z - 1.4   (mirror)
-    // We also tuck the forearms slightly inward with a small X bend.
-    // These are absolute rotation targets — we lerp to them on mount.
-
+    // Use exact bind-pose values as base, add X offset to bring arms down.
+    // rest.leftArm.x ≈ 0.1036 at true bind. Adding 1.35 → ~1.45 total.
+    // Clamp to actual rest values in case of variation between model loads.
     const LA = rest.leftArm;
     const RA = rest.rightArm;
+    const LF = rest.leftForeArm;
+    const RF = rest.rightForeArm;
 
-    smLeftArm.current = {
-      x: LA.x + 0.05,         // slight forward lean
-      y: LA.y,
-      z: LA.z + 1.42,         // rotate arm DOWN from T-pose
-    };
-    smRightArm.current = {
-      x: RA.x + 0.05,
-      y: RA.y,
-      z: RA.z - 1.42,         // mirror
-    };
+    tLA.current  = { x: LA.x + 1.35, y: LA.y, z: LA.z };
+    tLFA.current = { x: LF.x,        y: LF.y, z: LF.z };   // forearm keeps rest
+    tRA.current  = { x: RA.x + 1.35, y: RA.y, z: RA.z };
+    tRFA.current = { x: RF.x,        y: RF.y, z: RF.z };
 
     armsReady.current = true;
 
-    console.log("🎯 Arm targets set:",
-      `L z=${smLeftArm.current.z.toFixed(3)}`,
-      `R z=${smRightArm.current.z.toFixed(3)}`
+    console.log("🎯 Arm targets (absolute):",
+      `L x=${tLA.current.x.toFixed(3)} z=${tLA.current.z.toFixed(3)}`,
+      `R x=${tRA.current.x.toFixed(3)} z=${tRA.current.z.toFixed(3)}`
     );
   }, []);
 
@@ -234,7 +232,6 @@ export default function AnimatedModel({
     const t = timeRef.current;
     isSpeakRef.current = isSpeaking;
 
-    // ── Volume ─────────────────────────────────────────────
     let volume = 0;
     if (audioAnalyser && isSpeaking) {
       if (!freqData.current) freqData.current = new Uint8Array(audioAnalyser.frequencyBinCount);
@@ -244,56 +241,47 @@ export default function AnimatedModel({
       volume = sum / (12 * 255);
     }
 
-    // ── Gesture timer ──────────────────────────────────────
     poseTimer.current += delta;
     if (poseTimer.current >= curPose.current.duration) {
       poseTimer.current = 0;
       curPose.current   = nextPose.current;
       pickNext();
     }
-    blendAlpha.current = Math.min(blendAlpha.current + delta * 1.0, 1.0);
+    blendAlpha.current = Math.min(blendAlpha.current + delta, 1.0);
     const pose = blendAlpha.current >= 1 ? curPose.current : nextPose.current;
 
-    const SPEED      = 0.04;
-    const ARM_SPEED  = 0.06;   // arms ease in a bit faster on load
+    const SPEED     = 0.04;
+    const ARM_SPEED = 0.04;
 
-    const { rest,
-            spine2, neck1, head, leftEye, rightEye,
-            leftShoulder, leftArm, leftForeArm,
-            rightShoulder, rightArm, rightForeArm,
-            teethLower, teethRestY, teethRestRotX } = B.current;
+    const {
+      rest, spine2, neck1, head, leftEye, rightEye,
+      leftShoulder, leftArm, leftForeArm,
+      rightShoulder, rightArm, rightForeArm,
+      teethLower, teethRestY, teethRestRotX,
+    } = B.current;
 
-    // ── Head / spine smooth ────────────────────────────────
-    smSpine2.current.x = lerp(smSpine2.current.x, (pose.spine2?.x ?? 0), SPEED);
-    smSpine2.current.y = lerp(smSpine2.current.y, (pose.spine2?.y ?? 0), SPEED);
-    smSpine2.current.z = lerp(smSpine2.current.z, (pose.spine2?.z ?? 0), SPEED);
+    smSpine2.current.x = lerp(smSpine2.current.x, pose.spine2?.x ?? 0, SPEED);
+    smSpine2.current.y = lerp(smSpine2.current.y, pose.spine2?.y ?? 0, SPEED);
+    smSpine2.current.z = lerp(smSpine2.current.z, pose.spine2?.z ?? 0, SPEED);
+    smNeck1.current.x  = lerp(smNeck1.current.x,  pose.neck1?.x  ?? 0, SPEED * 1.3);
+    smNeck1.current.y  = lerp(smNeck1.current.y,  pose.neck1?.y  ?? 0, SPEED * 1.3);
+    smNeck1.current.z  = lerp(smNeck1.current.z,  pose.neck1?.z  ?? 0, SPEED * 1.3);
+    smHead.current.x   = lerp(smHead.current.x,   pose.head?.x   ?? 0, SPEED * 1.5);
+    smHead.current.y   = lerp(smHead.current.y,   pose.head?.y   ?? 0, SPEED * 1.5);
+    smHead.current.z   = lerp(smHead.current.z,   pose.head?.z   ?? 0, SPEED * 1.5);
 
-    smNeck1.current.x  = lerp(smNeck1.current.x,  (pose.neck1?.x  ?? 0), SPEED * 1.3);
-    smNeck1.current.y  = lerp(smNeck1.current.y,  (pose.neck1?.y  ?? 0), SPEED * 1.3);
-    smNeck1.current.z  = lerp(smNeck1.current.z,  (pose.neck1?.z  ?? 0), SPEED * 1.3);
-
-    smHead.current.x   = lerp(smHead.current.x,   (pose.head?.x   ?? 0), SPEED * 1.5);
-    smHead.current.y   = lerp(smHead.current.y,   (pose.head?.y   ?? 0), SPEED * 1.5);
-    smHead.current.z   = lerp(smHead.current.z,   (pose.head?.z   ?? 0), SPEED * 1.5);
-
-    // ── Body breathing ─────────────────────────────────────
     groupRef.current.scale.setScalar(1 + Math.sin(t * 0.8) * 0.003);
 
-    // ── Spine ──────────────────────────────────────────────
     if (spine2) {
       spine2.rotation.x = smSpine2.current.x + Math.sin(t * 0.7) * 0.003;
       spine2.rotation.y = smSpine2.current.y;
       spine2.rotation.z = smSpine2.current.z + Math.sin(t * 0.5) * 0.002;
     }
-
-    // ── Neck ───────────────────────────────────────────────
     if (neck1) {
       neck1.rotation.x = smNeck1.current.x;
       neck1.rotation.y = smNeck1.current.y;
       neck1.rotation.z = smNeck1.current.z;
     }
-
-    // ── Head ───────────────────────────────────────────────
     if (head) {
       const idleX = Math.sin(t * 0.38) * 0.008 + Math.sin(t * 0.61) * 0.003;
       const idleY = Math.sin(t * 0.27) * 0.006;
@@ -305,33 +293,25 @@ export default function AnimatedModel({
       head.rotation.z = smHead.current.z + idleZ;
     }
 
-    // ── Arms — lerp every frame toward down-target ─────────
     if (armsReady.current) {
-      const breathSway = Math.sin(t * 0.7) * 0.004;
+      const breathe = Math.sin(t * 0.8) * 0.004;
 
-      // Left arm: ease toward down position
-      leftArm.rotation.x = lerp(leftArm.rotation.x, smLeftArm.current.x, ARM_SPEED);
-      leftArm.rotation.y = lerp(leftArm.rotation.y, smLeftArm.current.y, ARM_SPEED);
-      leftArm.rotation.z = lerp(leftArm.rotation.z, smLeftArm.current.z + breathSway, ARM_SPEED);
+      leftArm.rotation.x = lerp(leftArm.rotation.x, tLA.current.x + breathe, ARM_SPEED);
+      leftArm.rotation.y = lerp(leftArm.rotation.y, tLA.current.y, ARM_SPEED);
+      leftArm.rotation.z = lerp(leftArm.rotation.z, tLA.current.z, ARM_SPEED);
 
-      // Left forearm: rest rotation + slight tuck
-      const LF = rest.leftForeArm;
-      leftForeArm.rotation.x = lerp(leftForeArm.rotation.x, LF.x + 0.08, ARM_SPEED);
-      leftForeArm.rotation.y = lerp(leftForeArm.rotation.y, LF.y,        ARM_SPEED);
-      leftForeArm.rotation.z = lerp(leftForeArm.rotation.z, LF.z,        ARM_SPEED);
+      leftForeArm.rotation.x = lerp(leftForeArm.rotation.x, tLFA.current.x, ARM_SPEED);
+      leftForeArm.rotation.y = lerp(leftForeArm.rotation.y, tLFA.current.y, ARM_SPEED);
+      leftForeArm.rotation.z = lerp(leftForeArm.rotation.z, tLFA.current.z, ARM_SPEED);
 
-      // Right arm
-      rightArm.rotation.x = lerp(rightArm.rotation.x, smRightArm.current.x, ARM_SPEED);
-      rightArm.rotation.y = lerp(rightArm.rotation.y, smRightArm.current.y, ARM_SPEED);
-      rightArm.rotation.z = lerp(rightArm.rotation.z, smRightArm.current.z - breathSway, ARM_SPEED);
+      rightArm.rotation.x = lerp(rightArm.rotation.x, tRA.current.x + breathe, ARM_SPEED);
+      rightArm.rotation.y = lerp(rightArm.rotation.y, tRA.current.y, ARM_SPEED);
+      rightArm.rotation.z = lerp(rightArm.rotation.z, tRA.current.z, ARM_SPEED);
 
-      // Right forearm
-      const RF = rest.rightForeArm;
-      rightForeArm.rotation.x = lerp(rightForeArm.rotation.x, RF.x + 0.08, ARM_SPEED);
-      rightForeArm.rotation.y = lerp(rightForeArm.rotation.y, RF.y,        ARM_SPEED);
-      rightForeArm.rotation.z = lerp(rightForeArm.rotation.z, RF.z,        ARM_SPEED);
+      rightForeArm.rotation.x = lerp(rightForeArm.rotation.x, tRFA.current.x, ARM_SPEED);
+      rightForeArm.rotation.y = lerp(rightForeArm.rotation.y, tRFA.current.y, ARM_SPEED);
+      rightForeArm.rotation.z = lerp(rightForeArm.rotation.z, tRFA.current.z, ARM_SPEED);
 
-      // Shoulders: keep at rest (no change)
       leftShoulder.rotation.x  = lerp(leftShoulder.rotation.x,  rest.leftShoulder.x,  ARM_SPEED);
       leftShoulder.rotation.y  = lerp(leftShoulder.rotation.y,  rest.leftShoulder.y,  ARM_SPEED);
       leftShoulder.rotation.z  = lerp(leftShoulder.rotation.z,  rest.leftShoulder.z,  ARM_SPEED);
@@ -340,11 +320,8 @@ export default function AnimatedModel({
       rightShoulder.rotation.z = lerp(rightShoulder.rotation.z, rest.rightShoulder.z, ARM_SPEED);
     }
 
-    // ── Blink ──────────────────────────────────────────────
     blinkTimer.current += delta;
-    if (blinkTimer.current >= nextBlink.current && blinkPhase.current === "idle") {
-      blinkPhase.current = "closing";
-    }
+    if (blinkTimer.current >= nextBlink.current && blinkPhase.current === "idle") blinkPhase.current = "closing";
     if (blinkPhase.current === "closing") {
       eyeBlink.current = lerp(eyeBlink.current, 1, 0.42);
       if (eyeBlink.current > 0.88) blinkPhase.current = "opening";
@@ -352,23 +329,17 @@ export default function AnimatedModel({
     if (blinkPhase.current === "opening") {
       eyeBlink.current = lerp(eyeBlink.current, 0, 0.36);
       if (eyeBlink.current < 0.08) {
-        eyeBlink.current   = 0;
-        blinkPhase.current = "idle";
-        blinkTimer.current = 0;
-        nextBlink.current  = 2.5 + Math.random() * 3.5;
+        eyeBlink.current = 0; blinkPhase.current = "idle";
+        blinkTimer.current = 0; nextBlink.current = 2.5 + Math.random() * 3.5;
       }
     }
     if (leftEye && rightEye) {
       const ey = 1 - eyeBlink.current * 0.9;
-      leftEye.scale.y  = ey;
-      rightEye.scale.y = ey;
+      leftEye.scale.y = ey; rightEye.scale.y = ey;
     }
 
-    // ── Jaw ────────────────────────────────────────────────
     if (teethLower) {
-      const target = isSpeaking
-        ? Math.min(volume * 3.2, 1.0) * (0.7 + Math.sin(t * 9.0) * 0.3)
-        : 0;
+      const target = isSpeaking ? Math.min(volume * 3.2, 1.0) * (0.7 + Math.sin(t * 9.0) * 0.3) : 0;
       jawOpen.current = lerp(jawOpen.current, target, 0.25);
       const o = jawOpen.current;
       teethLower.position.y = teethRestY - o * 0.012;
@@ -379,10 +350,7 @@ export default function AnimatedModel({
   return (
     <group ref={groupRef} position={[0, -4.8, 0]}>
       <Suspense fallback={
-        <mesh>
-          <boxGeometry args={[0.5, 1.5, 0.5]} />
-          <meshStandardMaterial color="#cccccc" />
-        </mesh>
+        <mesh><boxGeometry args={[0.5, 1.5, 0.5]} /><meshStandardMaterial color="#cccccc" /></mesh>
       }>
         <SyncedModel scale={1.75} onReady={handleReady} />
       </Suspense>

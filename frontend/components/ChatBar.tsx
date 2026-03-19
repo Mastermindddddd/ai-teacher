@@ -327,7 +327,8 @@ export default function ChatBar({
           fontSize: "10px", color: "#ccc",
           fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.06em",
         }}>
-          Powered by Gemini · Miss TMS can make mistakes
+       
+       
         </div>
       </div>
     </div>
